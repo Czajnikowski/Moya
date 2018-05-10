@@ -1,5 +1,4 @@
-Providers
-=========
+# Providers
 
 When using Moya, you make all API requests through a `MoyaProvider` instance,
 passing in a value of your enum that specifies which endpoint you want to call.
@@ -20,17 +19,18 @@ provider.request(.zen) { result in
 
 That's it! The `request()` method returns a `Cancellable`, which has
 only one public function, `cancel()`, which you can use to cancel the
-request.  See [Examples](Examples) for more information about the `Result`
+request. See [Examples](Examples) for more information about the `Result`
 type.
 
 Remember, *where* you put your target and the provider, are completely up
 to you. You can check out [Artsy's implementation](https://github.com/artsy/eidolon/blob/master/Kiosk/App/Networking/ArtsyAPI.swift)
 for an example.
 
-But don't forget to keep a reference for it in property. If it gets deallocated you'll see `-999 "cancelled"` error on response.
+Always remember to retain your providers, as they will get deallocated if you fail to do so. Deallocation will return a `-999 "canceled"` error on response.
 
-Advanced Usage
-------------
+The same reminder applies also to Moya Reactive implementations, but you will not receive any response because the whole Observable will be disposed, releasing any subscription that you may have configured.
+
+## Advanced Usage
 
 To explain all configuration options you have with a `MoyaProvider` we will cover each parameter one by one in the following sections.
 
@@ -41,9 +41,9 @@ endpoints closure, which is responsible for mapping a value of your enum to a
 concrete `Endpoint` instance. Let's take a look at what one might look like.
 
 ```swift
-let endpointClosure = { (target: MyTarget) -> Endpoint<MyTarget> in
-    let url = target.baseURL.appendingPathComponent(target.path).absoluteString
-    return Endpoint(URL: url, sampleResponseClosure: {.networkResponse(200, target.sampleData)}, method: target.method, parameters: target.parameters)
+let endpointClosure = { (target: MyTarget) -> Endpoint in
+    let url = URL(target: target).absoluteString
+    return Endpoint(url: url, sampleResponseClosure: {.networkResponse(200, target.sampleData)}, method: target.method, task: target.task, httpHeaderFields: target.headers)
 }
 let provider = MoyaProvider(endpointClosure: endpointClosure)
 ```
@@ -51,6 +51,8 @@ let provider = MoyaProvider(endpointClosure: endpointClosure)
 Notice that we don't have to specify the generic type in the `MoyaProvider`
 initializer anymore, since Swift will infer it from the type of our
 `endpointClosure`. Neat!
+
+You may also notice the `URL(target:)` initializer, Moya provides a convenient extension to create a `URL` from any `TargetType`.
 
 This `endpointClosure` is about as simple as you can get. It's actually the
 default implementation, too, stored in `MoyaProvider.defaultEndpointMapping`.
@@ -75,9 +77,9 @@ you can use your own closure.
 
 ```swift
 let provider = MoyaProvider<MyTarget>(stubClosure: { target: MyTarget -> Moya.StubBehavior in
-	switch target {
-		/* Return something different based on the target. */
-	}
+    switch target {
+        /* Return something different based on the target. */
+    }
 })
 ```
 
@@ -147,29 +149,29 @@ For example you can enable the logger plugin by simply passing `[NetworkLoggerPl
 ```swift
 public final class NetworkActivityPlugin: PluginType {
 
-    public typealias NetworkActivityClosure = (change: NetworkActivityChangeType) -> ()
+    public typealias NetworkActivityClosure = (_ change: NetworkActivityChangeType, _ target: TargetType) -> Void
     let networkActivityClosure: NetworkActivityClosure
 
-    public init(networkActivityClosure: NetworkActivityClosure) {
+    public init(networkActivityClosure: @escaping NetworkActivityClosure) {
         self.networkActivityClosure = networkActivityClosure
     }
 
     // MARK: Plugin
 
     /// Called by the provider as soon as the request is about to start
-    public func willSendRequest(request: RequestType, target: TargetType) {
-        networkActivityClosure(change: .began)
+    public func willSend(_ request: RequestType, target: TargetType) {
+        networkActivityClosure(.began, target)
     }
 
-    /// Called by the provider as soon as a response arrives
-    public func didReceiveResponse(data: Data?, statusCode: Int?, response: URLResponse?, error: ErrorType?, target: TargetType) {
-        networkActivityClosure(change: .ended)
+    /// Called by the provider as soon as a response arrives, even if the request is canceled.
+    public func didReceive(_ result: Result<Moya.Response, MoyaError>, target: TargetType) {
+        networkActivityClosure(.ended, target)
     }
 }
 ```
 
 The `networkActivityClosure` is a closure that you can provide to be notified whenever a network request begins or
 ends. This is useful for working with the [network activity indicator](https://github.com/thoughtbot/BOTNetworkActivityIndicator).
-Note that signature of this closure is `(change: NetworkActivityChangeType) -> ()`,
-so you will only be notified when a request has `.began` or `.ended` –
+Note that signature of this closure is `(_ change: NetworkActivityChangeType, _ target: TargetType) -> Void`,
+so you will only be notified when a request has `.began`/`.ended` and for which `target` –
 you aren't provided any other details about the request itself.

@@ -21,9 +21,12 @@ DerivedData
 # AppCode
 .idea/
 
-Carthage/Build
-Carthage/Checkouts
+Carthage
 
 Demo/Pods
 .ruby-version
 .ruby-gemset
+# Swift Package Manager
+.build
+Packages
+Package.pins
